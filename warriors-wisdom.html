@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Warrior's Wisdom — Detective Game</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow-x: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ── GAME DATA ─────────────────────────────────────────────────────────────────
+
+    const SCENES = {
+      title: { type: "title" },
+
+      intro: {
+        id: "intro", type: "story",
+        location: "NAIROBI — 4:47 AM",
+        art: "city_night",
+        narration: `Your phone shatters the silence. A voice, clipped with urgency: "Detective — the National Museum. The Warrior's Wisdom has been stolen. Kenya's most sacred Kamba carving. Get here now."`,
+        choices: [
+          { text: "Rush to the scene immediately", next: "museum", rep: 5 },
+          { text: "Call for backup before moving", next: "museum", rep: -2, evidence: { id: "backup", label: "Backup Requested", detail: "You coordinated support before rushing in. Professional protocol." } },
+        ],
+      },
+
+      museum: {
+        id: "museum", type: "scene",
+        location: "NAIROBI NATIONAL MUSEUM — East Wing",
+        art: "museum",
+        narration: `Police strobes paint the marble halls. The display case is a jagged mouth of broken glass. The Warrior's Wisdom — gone. Security Director Kipkorir Cheboi approaches, jaw tight, hands clasped behind his back.`,
+        hotspots: [
+          { label: "Examine broken glass", icon: "🔍", evidence: { id: "glass_pattern", label: "Glass Pattern", detail: "Glass broke OUTWARD — from inside the case, not smashed from outside. Someone with access opened it deliberately." }, next: "crime_scene" },
+          { label: "Check security terminal", icon: "💻", evidence: { id: "security_footage", label: "Security Footage", detail: "Camera 3 — the only angle on the display — was manually looped 2:10–3:05 AM. Login ID: KCH-015 (Kipkorir's credentials). But he signed in at the front desk at 2:15 AM." }, next: "security_room" },
+          { label: "Interview Night Guard James", icon: "👮", next: "witness_james" },
+        ],
+      },
+
+      crime_scene: {
+        id: "crime_scene", type: "scene",
+        location: "CRIME SCENE — Display Plinth",
+        art: "crime_scene",
+        narration: `You crouch beside the empty plinth. Fine wood shavings dust the marble. A fragment of deep red bead catches the light. In the loading bay mud outside: wide-set tire tracks, military-grade tread.`,
+        hotspots: [
+          { label: "Collect wood shavings", icon: "🪵", next: "forensics_wood", evidence: { id: "wood_shavings", label: "Wood Shavings", detail: "Sent to lab for analysis." } },
+          { label: "Collect bead fragment", icon: "🔴", next: "forensics_beads", evidence: { id: "bead_fragment", label: "Red Bead Fragment", detail: "Sent to lab for analysis." } },
+          { label: "Cast tire tracks", icon: "🚗", evidence: { id: "tire_tracks", label: "Tire Track Casts", detail: "Michelin LTX — standard government fleet tread. Wheelbase matches a Land Cruiser 200 series. Cabinet allocation." }, next: "museum" },
+        ],
+      },
+
+      security_room: {
+        id: "security_room", type: "story",
+        location: "SECURITY CONTROL ROOM",
+        art: "security",
+        narration: `Banks of monitors, most dark. The terminal log shows a 55-minute manual override — someone used Kipkorir's credentials remotely while he was visibly elsewhere. One name appears on the after-hours visitor log: Dr. Muthoni Kamau, signed in at 1:58 AM.`,
+        choices: [
+          { text: "Confront Kipkorir now", next: "interrogate_kipkorir" },
+          { text: "Search Muthoni's office first", next: "curator_office", evidence: { id: "access_log", label: "Access Log Copy", detail: "Muthoni entered 1:58 AM. Override triggered 2:10 AM. She had 12 minutes alone with the system before Kipkorir's credentials were used." } },
+        ],
+      },
+
+      witness_james: {
+        id: "witness_james", type: "story",
+        location: "STAFF CORRIDOR — James Ochieng, Night Guard",
+        art: "corridor",
+        narration: `James is pale, eyes darting. "I heard glass at 2:30 but the alarm stayed silent for another seven minutes — that's not a malfunction, someone suppressed it. And that black SUV in the loading zone — government plates, KBZ prefix. Cabinet allocation series. I've seen those at State House events."`,
+        choices: [
+          { text: "Ask about the SUV driver", next: "market", evidence: { id: "suv_witness", label: "James's Testimony", detail: '"Driver wore a suit, not a uniform. Stayed in the vehicle. A woman brought out a wrapped object — maybe 60cm long."' } },
+          { text: "Ask about the silent alarm", next: "curator_office", evidence: { id: "alarm_suppressed", label: "Alarm Suppression Log", detail: "Seven-minute delay is an admin-level suppression, not a fault. Someone with system access held the trigger." } },
+        ],
+      },
+
+      market: {
+        id: "market", type: "scene",
+        location: "MAASAI MARKET — City Centre",
+        art: "market",
+        narration: `Morning heat rises off the tarmac. Stalls overflow with beadwork and carvings. A young vendor — Amara Okonkwo, maybe 28 — freezes when she sees your badge. Her hands know wood. She knows something.`,
+        hotspots: [
+          { label: "Show her the bead fragment", icon: "🔴", evidence: { id: "amara_beads", label: "Amara's Testimony", detail: '"That batch — factory glass, Chinese import. A man bought a whole tray six weeks ago. Paid cash. He asked how to age wood quickly using ammonia and linseed oil."' }, next: "market" },
+          { label: "Ask about the buyer", icon: "🗣️", evidence: { id: "raj_lead", label: "Mysterious Buyer", detail: '"Well-dressed Indian man. Left a business card: Raj Patel, Art Consultant. He asked specifically about the museum\'s authentication process."' }, next: "curator_office" },
+          { label: "Check her woodwork", icon: "🔨", evidence: { id: "forgery_technique", label: "Forgery Method Identified", detail: "Ammonia fuming + linseed oil creates convincing patina in 72 hours. This forgery was planned at minimum 2 months before the theft." }, next: "curator_office" },
+        ],
+      },
+
+      curator_office: {
+        id: "curator_office", type: "scene",
+        location: "DR. KAMAU'S OFFICE — National Museum",
+        art: "office",
+        narration: `Dr. Muthoni Kamau's workspace is surgical. Every paper aligned. But her computer is still unlocked — mid-session. On screen: encrypted correspondence, and a shipping manifest for "Cultural Exchange Items" bound for Rotterdam via Mombasa port, three days out. Authorised by: Cabinet Secretary M. Njoroge.`,
+        hotspots: [
+          { label: "Copy the shipping manifest", icon: "📋", evidence: { id: "manifest", label: "Shipping Manifest #47823", detail: "Container MSCU-8821. Contents: 'craft samples'. Mombasa port. Rotterdam destination. Authorised by Cabinet Secretary Njoroge — Cultural Ministry." }, next: "interrogate_muthoni" },
+          { label: "Search the desk drawer", icon: "🗄️", evidence: { id: "interpol_card", label: "Hidden Interpol Contact", detail: "A plain card — just a London number. On the back in tiny print: 'Cultural Property Division, ICPO.' She has been in contact with Interpol." }, next: "interrogate_muthoni" },
+          { label: "Read the encrypted emails", icon: "📧", evidence: { id: "encrypted_emails", label: "Encrypted Correspondence", detail: "Partially decrypted. References a 'controlled release' and 'trace route activation'. Someone planned this theft as a sting operation." }, next: "interrogate_muthoni" },
+        ],
+      },
+
+      forensics_wood: { id: "forensics_wood", type: "forensics", puzzle: "wood", returnTo: "crime_scene" },
+      forensics_beads: { id: "forensics_beads", type: "forensics", puzzle: "beads", returnTo: "crime_scene" },
+
+      interrogate_kipkorir: {
+        id: "interrogate_kipkorir", type: "interrogation", returnTo: "curator_office",
+        suspect: {
+          name: "Kipkorir Cheboi", role: "Head of Museum Security", threat: "MEDIUM",
+          color: "#2ab8a0",
+          opening: "This theft happened on my watch. I take full responsibility for whatever went wrong.",
+          responses: {
+            whereWere: { low: "I was on patrol — it's all in my duty log.", mid: "I was at the front desk from 2:15. Someone must have used my credentials remotely — I was visible to three people.", high: "I took the real carving months ago. What was stolen tonight was a forgery I commissioned. I hid the original. The cartel had a mole — I knew they were coming." },
+            whatKnow: { low: "I know there are people in this city who would pay a fortune for that piece.", mid: "I know Dr. Kamau has been acting strangely. Working nights. Encrypted calls.", high: "The real Warrior's Wisdom is in a safe house in Westlands. I'll take you there. But understand — the people behind this reach into the Cabinet itself." },
+            whoInvolved: { low: "I can't say. Not without protection.", mid: "A government SUV was in the loading bay. That's not a coincidence.", high: "Cabinet Secretary Njoroge's aide coordinates the logistics. The Governor in Mombasa owns the shipping company. And someone inside Interpol knows everything." },
+          },
+          revelation: "The Warrior's Wisdom was never stolen. I protected it. The cartel stole a forgery. Every move tonight was designed to expose them — and it worked. I just need you to trust me long enough to finish it.",
+          revelationEvidence: { id: "kipkorir_truth", label: "Kipkorir's Revelation", detail: "The original carving is safe. The theft was a controlled operation. Kipkorir acted unilaterally to protect the artifact from an inside threat he couldn't report through official channels." },
+        },
+      },
+
+      interrogate_muthoni: {
+        id: "interrogate_muthoni", type: "interrogation", returnTo: "port",
+        suspect: {
+          name: "Dr. Muthoni Kamau", role: "Museum Curator", threat: "HIGH",
+          color: "#c8872a",
+          opening: "Detective. I've been expecting you. What happened tonight is more complicated than it appears.",
+          responses: {
+            whereWere: { low: "I was working late on authentication reports. You can check the system logs.", mid: "I was at my desk until 2:40 AM. I know how that looks given the override timing. I have an explanation.", high: "I accessed the security system to verify a protocol I set in motion two years ago. I am not the thief." },
+            whatKnow: { low: "I know the piece had been re-authenticated three times in six months. Someone needed it valued repeatedly.", mid: "I know Raj Patel is not an art dealer. And I know Cabinet Secretary Njoroge has been moving artifacts through Mombasa for eighteen months.", high: "I have been working with Interpol's Cultural Property Division for two years. Tonight was not a theft. It was a controlled operation to trace the cartel's shipping route." },
+            whoInvolved: { low: "There are people in very high positions involved. I need protection before I say more.", mid: "The authorisation on that shipping manifest — Njoroge's signature. The Mombasa shipping company — check who owns it. Thirty percent is a governor.", high: "Raj Patel is ICPO — Cultural Property Division. The SUV plates belong to Njoroge's aide. We have documented everything. We just need the arrest to stick. That's where you come in." },
+          },
+          revelation: "I'm your ally, Detective. Always was. Interpol operation 'Amber Chain' — two years in the making. Raj Patel is the field lead. The container ship is already at sea and we have agents aboard. What I need from you is an official arrest warrant for Njoroge before he flies out tomorrow morning.",
+          revelationEvidence: { id: "muthoni_operation", label: "Operation Amber Chain", detail: "A two-year Interpol operation led from inside the museum. The theft was controlled bait. The real target is Cabinet Secretary Njoroge and the international cartel he fronts." },
+        },
+      },
+
+      port: {
+        id: "port", type: "scene",
+        location: "MOMBASA PORT — Container Warehouse",
+        art: "port",
+        narration: `Salt air and diesel fumes. An impossible maze of containers. Dock supervisor Hassan Mbarak pulls you aside — twenty years here, he knows every irregularity. "Container MSCU-8821 cleared in forty minutes. Normally takes a week. Governor Swaleh's office made a call. And it left on the MV Uhuru Star six hours ago."`,
+        hotspots: [
+          { label: "Examine the empty container", icon: "📦", evidence: { id: "container_clue", label: "Container Evidence", detail: "MSCU-8821 is empty — but inside: a torn piece of red Kamba ceremonial cloth. The same weave used to wrap the Warrior's Wisdom during museum transport." }, next: "port" },
+          { label: "Get clearance records", icon: "📋", evidence: { id: "clearance_override", label: "Clearance Override", detail: "Manual override at 3:42 AM. Phone authorisation logged as 'Governor's Office' — no name, no badge. The port director signed without question." }, next: "interrogate_governor" },
+          { label: "Talk to Hassan", icon: "👷", evidence: { id: "hassan_testimony", label: "Hassan's Testimony", detail: '"I\'ve seen that company\'s containers before. Always priority clearance. Always nights. And always the same woman co-signing — works in the Governor\'s transport office."' }, next: "interrogate_governor" },
+        ],
+      },
+
+      interrogate_governor: {
+        id: "interrogate_governor", type: "interrogation", returnTo: "finale",
+        suspect: {
+          name: "Governor Fatuma Swaleh", role: "Mombasa County Governor", threat: "CRITICAL",
+          color: "#c84242",
+          opening: "Welcome to Mombasa, Detective. I trust you're enjoying our hospitality. What can I do for you?",
+          responses: {
+            whereWere: { low: "I was at a state dinner all evening. Fifty witnesses.", mid: "Whatever happened at that port happened without my knowledge or authorisation.", high: "My office made a call. I was told it was a routine cultural exchange — Heritage Ministry clearance. I signed off on a recommendation, not a theft." },
+            whatKnow: { low: "I know nothing about any stolen carving. This is a matter for Nairobi, not my county.", mid: "I know that when Cabinet Secretaries ask favours through official channels, governors don't refuse. That's how this works.", high: "I own thirty percent of the shipping company — it was presented as a clean infrastructure investment two years ago. I understand now what it actually is. I was used." },
+            whoInvolved: { low: "You're making serious accusations. My lawyers will be in touch.", mid: "If you have evidence against Cabinet-level officials, take it to the DPP. Not to me.", high: "Njoroge approached me personally. He said Heritage Ministry, cultural exchange programme. I signed papers without reading them carefully enough. That was my failure. I won't compound it by lying to you." },
+          },
+          revelation: "Njoroge runs the entire operation from Nairobi. The shipping company is his — I was a convenient local face. I'll give you everything: the corporate structure, the shell companies, the port officials on the payroll. I want a deal. And I want Njoroge in handcuffs before I sign anything.",
+          revelationEvidence: { id: "governor_deal", label: "Governor's Cooperation Agreement", detail: "Swaleh agrees to full cooperation. Names Njoroge as the operation's architect. Provides corporate structure evidence linking Cabinet-level officials to the international cartel." },
+        },
+      },
+
+      finale: {
+        id: "finale", type: "ending",
+        art: "airport",
+      },
+    };
+
+    const FORENSICS = {
+      wood: {
+        title: "FORENSICS LAB — Wood Sample Analysis",
+        instruction: "Identify the authentic Kamba heartwood samples. Select all that match the crime scene evidence.",
+        samples: [
+          { id: 1, emoji: "🪵", label: "Sample A", desc: "Dark grain, deep mineral veining, micro-fractures consistent with century-old ageing", authentic: true },
+          { id: 2, emoji: "🌲", label: "Sample B", desc: "Pale uniform grain, softwood import — Tanzanian cedar, recent mill cut", authentic: false },
+          { id: 3, emoji: "🪵", label: "Sample C", desc: "Natural oxidation ring at core, uneven patina distribution, genuine ageing patterns", authentic: true },
+          { id: 4, emoji: "🧪", label: "Sample D", desc: "Chemically stained — uniform brown colour, no natural wear variation. Artificially aged.", authentic: false },
+        ],
+        correctIds: [1, 3],
+        hint: "Authentic Kamba heartwood shows natural mineral deposits and uneven ageing. Artificial ageing produces unnaturally uniform colour.",
+        successEvidence: { id: "wood_analysis", label: "Wood Analysis Complete", detail: "CONFIRMED: Crime scene wood is freshly cut and artificially aged using chemical treatment. The stolen piece was a deliberate forgery — planned months in advance." },
+      },
+      beads: {
+        title: "FORENSICS LAB — Bead Authentication",
+        instruction: "Select the traditional handmade beads. Distinguish genuine craft from factory replicas.",
+        samples: [
+          { id: 1, emoji: "🔴", label: "Sample A", desc: "Hand-blown glass, irregular shape, natural dye with slight colour variation — characteristic imperfections of craft work", authentic: true },
+          { id: 2, emoji: "🔵", label: "Sample B", desc: "Perfect sphere, machine-uniform colour, synthetic dye — mass manufactured, no variation", authentic: false },
+          { id: 3, emoji: "🟡", label: "Sample C", desc: "Venetian trade bead, lead glass composition, historical wear patterns, 19th century manufacture", authentic: true },
+          { id: 4, emoji: "🟢", label: "Sample D", desc: "Plastic composite, UV-reactive colour — modern replica, zero historical value", authentic: false },
+        ],
+        correctIds: [1, 3],
+        hint: "Traditional handmade beads have natural imperfections. Machine-manufactured beads are too geometrically perfect.",
+        successEvidence: { id: "bead_analysis", label: "Bead Analysis Complete", detail: "Crime scene beads are factory-manufactured — not traditional Maasai craft. The forgery was assembled using mass-produced materials bought locally, confirming premeditation." },
+      },
+    };
+
+    // ── SCENE ART ─────────────────────────────────────────────────────────────────
+    function SceneArt({ type }) {
+      const styles = {
+        city_night: {
+          background: "linear-gradient(180deg, #0a0612 0%, #150d28 40%, #1a0a08 100%)",
+          elements: (
+            <>
+              {[...Array(8)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", bottom: 0, left: `${8 + i * 12}%`, width: `${6 + (i % 3) * 3}%`, height: `${30 + (i % 5) * 12}%`, background: `rgba(${20 + i * 5},${15 + i * 3},${30 + i * 4},0.9)`, borderTop: "2px solid rgba(200,135,42,0.3)" }}>
+                  {[...Array(Math.floor(Math.random() * 4) + 2)].map((_, j) => (
+                    <div key={j} style={{ position: "absolute", top: `${10 + j * 20}%`, left: "15%", width: "70%", height: "8%", background: `rgba(255,220,100,${Math.random() > 0.5 ? 0.6 : 0.1})` }} />
+                  ))}
+                </div>
+              ))}
+              <div style={{ position: "absolute", top: "20%", right: "15%", width: 40, height: 40, borderRadius: "50%", background: "radial-gradient(circle, #fffbe0, #f0c060)", boxShadow: "0 0 40px 20px rgba(240,192,96,0.3)" }} />
+              <div style={{ position: "absolute", bottom: "25%", left: "5%", right: "5%", height: 2, background: "linear-gradient(90deg, transparent, rgba(200,135,42,0.6), transparent)" }} />
+            </>
+          ),
+        },
+        museum: {
+          background: "linear-gradient(180deg, #0d0b08 0%, #1a1208 60%, #0d0a06 100%)",
+          elements: (
+            <>
+              <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "60%", height: "85%", background: "rgba(30,20,10,0.95)", borderLeft: "4px solid rgba(200,135,42,0.4)", borderRight: "4px solid rgba(200,135,42,0.4)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 20 }}>
+                <div style={{ width: "80%", height: 8, background: "rgba(200,135,42,0.4)", marginBottom: 10 }} />
+                <div style={{ display: "flex", gap: 12 }}>
+                  {[...Array(4)].map((_, i) => <div key={i} style={{ width: 12, height: 60, background: "rgba(180,140,80,0.5)" }} />)}
+                </div>
+              </div>
+              <div style={{ position: "absolute", top: "25%", left: "20%", width: "25%", height: "40%", background: "rgba(15,10,5,0.8)", border: "3px solid rgba(200,135,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: "60%", height: "60%", border: "2px dashed rgba(200,66,66,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: 28, opacity: 0.4 }}>⬜</span>
+                </div>
+              </div>
+              <div style={{ position: "absolute", top: "25%", left: "22%", color: "rgba(200,66,66,0.8)", fontSize: 11, fontFamily: "monospace" }}>EMPTY</div>
+              <div style={{ position: "absolute", bottom: "10%", left: "5%", right: "5%", height: 2, background: "linear-gradient(90deg, transparent, rgba(200,66,66,0.5), transparent)", animation: "pulse 2s infinite" }} />
+            </>
+          ),
+        },
+        crime_scene: {
+          background: "linear-gradient(180deg, #080605 0%, #120e08 100%)",
+          elements: (
+            <>
+              <div style={{ position: "absolute", bottom: "20%", left: "50%", transform: "translateX(-50%)", width: 80, height: 100, background: "rgba(20,14,8,0.9)", border: "2px solid rgba(200,135,42,0.4)" }}>
+                <div style={{ position: "absolute", top: "20%", left: "20%", right: "20%", bottom: "20%", border: "1px dashed rgba(200,66,66,0.5)" }} />
+              </div>
+              {[...Array(6)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", bottom: `${15 + Math.random() * 10}%`, left: `${35 + Math.random() * 30}%`, width: 3, height: 8, background: "rgba(200,135,42,0.6)", transform: `rotate(${Math.random() * 45}deg)` }} />
+              ))}
+              <div style={{ position: "absolute", bottom: "12%", left: "60%", width: 8, height: 8, borderRadius: "50%", background: "rgba(200,66,66,0.7)", boxShadow: "0 0 8px rgba(200,66,66,0.5)" }} />
+              <div style={{ position: "absolute", top: "20%", right: "10%", width: 40, height: 60, background: "rgba(200,135,42,0.08)", border: "1px solid rgba(200,135,42,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🔦</div>
+            </>
+          ),
+        },
+        security: {
+          background: "linear-gradient(180deg, #060810 0%, #0a0c18 100%)",
+          elements: (
+            <>
+              {[...Array(6)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", top: `${10 + (i % 2) * 35}%`, left: `${5 + i * 16}%`, width: "14%", height: "28%", background: `rgba(${i === 2 ? "20,40,80" : "10,15,25"},0.9)`, border: `1px solid rgba(${i === 2 ? "42,100,200" : "42,60,120"},0.4)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                  {i === 2 ? "🔴" : "📺"}
+                </div>
+              ))}
+              <div style={{ position: "absolute", bottom: "15%", left: "30%", width: "40%", height: "20%", background: "rgba(10,20,40,0.9)", border: "1px solid rgba(42,100,200,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "rgba(42,180,160,0.8)", fontFamily: "monospace", fontSize: 11 }}>TERMINAL — OVERRIDE LOG</span>
+              </div>
+            </>
+          ),
+        },
+        corridor: {
+          background: "linear-gradient(180deg, #0a0806 0%, #140f08 100%)",
+          elements: (
+            <>
+              <div style={{ position: "absolute", top: "5%", bottom: "5%", left: "20%", width: 3, background: "linear-gradient(180deg, rgba(200,135,42,0.3), transparent)" }} />
+              <div style={{ position: "absolute", top: "5%", bottom: "5%", right: "20%", width: 3, background: "linear-gradient(180deg, rgba(200,135,42,0.3), transparent)" }} />
+              {[...Array(5)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", top: `${15 + i * 16}%`, left: "22%", right: "22%", height: 1, background: `rgba(200,135,42,${0.1 - i * 0.015})` }} />
+              ))}
+              <div style={{ position: "absolute", bottom: "15%", left: "40%", width: 60, height: 80, background: "rgba(20,14,8,0.8)", border: "1px solid rgba(200,135,42,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>👮</div>
+            </>
+          ),
+        },
+        market: {
+          background: "linear-gradient(180deg, #1a1008 0%, #0f0a04 100%)",
+          elements: (
+            <>
+              {[...Array(5)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", bottom: "10%", left: `${5 + i * 19}%`, width: "16%", height: "55%", background: "rgba(25,15,8,0.8)", borderTop: `3px solid rgba(${i % 2 === 0 ? "200,135,42" : "42,184,160"},0.5)` }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "30%", background: `rgba(${i % 2 === 0 ? "200,135,42" : "42,184,160"},0.08)`, display: "flex", flexWrap: "wrap", gap: 2, padding: 4 }}>
+                    {[...Array(4)].map((_, j) => <div key={j} style={{ width: 6, height: 6, borderRadius: "50%", background: `rgba(${200 - j * 40},${100 + j * 30},42,0.7)` }} />)}
+                  </div>
+                </div>
+              ))}
+              <div style={{ position: "absolute", top: "15%", right: "10%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>☀️</div>
+            </>
+          ),
+        },
+        office: {
+          background: "linear-gradient(180deg, #080806 0%, #121008 100%)",
+          elements: (
+            <>
+              <div style={{ position: "absolute", bottom: "15%", left: "25%", right: "25%", height: "30%", background: "rgba(18,12,6,0.95)", border: "1px solid rgba(200,135,42,0.3)" }}>
+                <div style={{ position: "absolute", top: "20%", left: "10%", right: "10%", height: "50%", background: "rgba(20,40,80,0.6)", border: "1px solid rgba(42,100,200,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ color: "rgba(42,180,160,0.8)", fontFamily: "monospace", fontSize: 9 }}>MANIFEST #47823</span>
+                </div>
+              </div>
+              {[...Array(3)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", top: `${20 + i * 15}%`, right: "15%", width: "20%", height: "8%", background: "rgba(200,135,42,0.06)", border: "1px solid rgba(200,135,42,0.15)", borderRadius: 2 }} />
+              ))}
+              <div style={{ position: "absolute", top: "10%", left: "10%", width: "18%", height: "50%", background: "rgba(10,8,5,0.9)", display: "flex", flexDirection: "column", gap: 4, padding: 6 }}>
+                {[...Array(8)].map((_, i) => <div key={i} style={{ height: 3, background: `rgba(200,135,42,${0.2 + i * 0.03})`, width: `${60 + (i % 3) * 20}%` }} />)}
+              </div>
+            </>
+          ),
+        },
+        port: {
+          background: "linear-gradient(180deg, #060a10 0%, #0a1018 100%)",
+          elements: (
+            <>
+              {["#1e3a5f", "#2a4a70", "#162840"].map((c, i) => (
+                <div key={i} style={{ position: "absolute", bottom: "20%", left: `${5 + i * 30}%`, width: "25%", height: `${40 + i * 8}%`, background: c, border: "1px solid rgba(42,100,160,0.3)" }}>
+                  <div style={{ position: "absolute", top: "30%", left: "10%", right: "10%", height: "4px", background: "rgba(200,135,42,0.4)" }} />
+                  <div style={{ position: "absolute", top: "50%", left: "10%", right: "10%", height: "4px", background: "rgba(200,135,42,0.2)" }} />
+                </div>
+              ))}
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "20%", background: "linear-gradient(180deg, #0a1020, #060810)" }}>
+                <div style={{ position: "absolute", top: "30%", left: 0, right: 0, height: 1, background: "rgba(42,100,160,0.4)" }} />
+              </div>
+            </>
+          ),
+        },
+        airport: {
+          background: "linear-gradient(180deg, #0a1a08 0%, #060e06 100%)",
+          elements: (
+            <>
+              <div style={{ position: "absolute", top: "20%", left: "50%", transform: "translateX(-50%)", fontSize: 60 }}>✈️</div>
+              <div style={{ position: "absolute", bottom: "20%", left: "15%", right: "15%", height: 2, background: "linear-gradient(90deg, transparent, rgba(42,184,160,0.8), transparent)", animation: "pulse 1.5s infinite" }} />
+              {[...Array(5)].map((_, i) => (
+                <div key={i} style={{ position: "absolute", bottom: "22%", left: `${15 + i * 17}%`, width: 4, height: 20, background: `rgba(42,184,160,${0.3 + i * 0.1})` }} />
+              ))}
+            </>
+          ),
+        },
+      };
+
+      const s = styles[type] || styles.city_night;
+      return (
+        <div style={{ position: "relative", width: "100%", height: 180, background: s.background, borderRadius: "8px 8px 0 0", overflow: "hidden", flexShrink: 0 }}>
+          {s.elements}
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 60%, rgba(13,11,8,0.95) 100%)" }} />
+        </div>
+      );
+    }
+
+    // ── COMPONENTS ────────────────────────────────────────────────────────────────
+
+    function EvidenceBoard({ evidence, onClose }) {
+      return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+          <div style={{ background: "#0f0c08", border: "1px solid #3a2e1e", borderRadius: 12, padding: 28, maxWidth: 680, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.4rem", color: "#c8872a" }}>📋 Evidence Board</div>
+              <button onClick={onClose} style={{ background: "none", border: "none", color: "#6a5a42", cursor: "pointer", fontSize: "1.3rem" }}>✕</button>
+            </div>
+            {evidence.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "3rem", color: "#6a5a42", fontFamily: "'Crimson Text', serif", fontSize: "1.05rem" }}>
+                No evidence collected yet. Begin your investigation.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                {evidence.map(ev => (
+                  <div key={ev.id} style={{ background: "#1a1510", border: "1px solid #3a2e1e", borderRadius: 8, padding: 14, transition: "border-color 0.2s" }}>
+                    <div style={{ color: "#c8872a", fontFamily: "'Playfair Display', serif", fontSize: "0.9rem", fontWeight: 600, marginBottom: 8, display: "flex", gap: 8 }}>
+                      <span>📌</span>{ev.label}
+                    </div>
+                    <div style={{ color: "#8a7a62", fontFamily: "'Crimson Text', serif", fontSize: "0.88rem", lineHeight: 1.55 }}>{ev.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function Toast({ msg, color }) {
+      return (
+        <div style={{ position: "fixed", top: 20, right: 20, zIndex: 999, background: "#0f0c08", border: `1px solid ${color}`, borderRadius: 8, padding: "12px 18px", maxWidth: 280, boxShadow: "0 4px 24px rgba(0,0,0,0.7)", animation: "slideIn 0.3s ease" }}>
+          <div style={{ color, fontFamily: "'Crimson Text', serif", fontSize: "0.95rem", lineHeight: 1.5 }}>{msg}</div>
+        </div>
+      );
+    }
+
+    function ForensicsGame({ puzzleKey, onComplete, onEvidenceCollect }) {
+      const puzzle = FORENSICS[puzzleKey];
+      const [selected, setSelected] = useState([]);
+      const [result, setResult] = useState(null);
+      const [done, setDone] = useState(false);
+
+      const toggle = (id) => {
+        if (done) return;
+        setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+        setResult(null);
+      };
+
+      const submit = () => {
+        const correct = puzzle.correctIds.every(id => selected.includes(id)) && selected.every(id => puzzle.correctIds.includes(id));
+        if (correct) {
+          setResult("correct");
+          setDone(true);
+          onEvidenceCollect(puzzle.successEvidence);
+          setTimeout(onComplete, 1800);
+        } else {
+          setResult("wrong");
+          setTimeout(() => setResult(null), 1000);
+        }
+      };
+
+      return (
+        <div style={{ padding: "28px 28px 0" }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", color: "#e8ddc8", marginBottom: 6 }}>{puzzle.title}</div>
+          <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "1rem", color: "#8a7a62", lineHeight: 1.6, marginBottom: 16 }}>{puzzle.instruction}</div>
+          <div style={{ background: "rgba(42,184,160,0.06)", borderLeft: "3px solid rgba(42,184,160,0.5)", padding: "10px 14px", borderRadius: "0 4px 4px 0", marginBottom: 20 }}>
+            <span style={{ color: "#8a7a62", fontFamily: "'Crimson Text', serif", fontSize: "0.88rem" }}>💡 {puzzle.hint}</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            {puzzle.samples.map(s => {
+              const sel = selected.includes(s.id);
+              const isWrong = result === "wrong" && sel && !puzzle.correctIds.includes(s.id);
+              return (
+                <div key={s.id} onClick={() => toggle(s.id)} style={{ background: sel ? "rgba(42,184,160,0.1)" : "#1a1510", border: `2px solid ${isWrong ? "#c84242" : sel ? "#2ab8a0" : "#3a2e1e"}`, borderRadius: 8, padding: "14px 16px", cursor: done ? "default" : "pointer", transition: "all 0.2s", transform: isWrong ? "translateX(-4px)" : "none" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: 8, textAlign: "center" }}>{s.emoji}</div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.85rem", color: sel ? "#2ab8a0" : "#c8872a", fontWeight: 600, marginBottom: 6, textAlign: "center" }}>{s.label}</div>
+                  <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.82rem", color: "#6a5a42", lineHeight: 1.4 }}>{s.desc}</div>
+                  {done && sel && <div style={{ marginTop: 8, color: "#2ab8a0", fontSize: "0.8rem", textAlign: "center" }}>✓ Confirmed</div>}
+                </div>
+              );
+            })}
+          </div>
+          {result === "correct" ? (
+            <div style={{ background: "rgba(42,184,160,0.1)", border: "1px solid #2ab8a0", borderRadius: 8, padding: "14px 20px", textAlign: "center", fontFamily: "'Crimson Text', serif", color: "#2ab8a0", fontSize: "1rem", marginBottom: 20 }}>
+              ✓ Analysis complete — evidence secured. Proceeding...
+            </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 24 }}>
+              <span style={{ fontFamily: "'Crimson Text', serif", color: "#6a5a42", fontSize: "0.9rem" }}>Selected: {selected.length} / {puzzle.correctIds.length} required</span>
+              <button onClick={submit} style={{ background: "linear-gradient(135deg, #2ab8a0, #1e9a84)", border: "none", borderRadius: 6, padding: "11px 26px", color: "#fff", fontFamily: "'Playfair Display', serif", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer", letterSpacing: 0.5 }}>
+                Submit Analysis
+              </button>
+            </div>
+          )}
+          {result === "wrong" && (
+            <div style={{ textAlign: "center", color: "#c84242", fontFamily: "'Crimson Text', serif", fontSize: "0.9rem", paddingBottom: 16 }}>
+              Incorrect — review the samples carefully.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function InterrogationGame({ scene, onComplete, onEvidenceCollect, hasEvidence }) {
+      const char = scene.suspect;
+      const [coop, setCoop] = useState(0.35);
+      const [pressure, setPressure] = useState(0);
+      const [transcript, setTranscript] = useState([{ type: "narrator", text: `${char.name} sits across from you, composed.` }, { type: "suspect", speaker: char.name, text: char.opening }]);
+      const [done, setDone] = useState(false);
+      const [topicsUsed, setTopicsUsed] = useState([]);
+      const scrollRef = useRef(null);
+
+      useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, [transcript]);
+
+      const getResponse = (topicKey) => {
+        const r = char.responses[topicKey];
+        if (coop < 0.4) return r.low;
+        if (coop < 0.72) return r.mid;
+        return r.high;
+      };
+
+      const doApproach = (id) => {
+        if (done) return;
+        const effects = {
+          rapport: { coopD: 0.16, pressD: -0.05, narr: `${char.name} visibly relaxes. A trace of trust enters their eyes.` },
+          evidence: { coopD: 0.22, pressD: 0.14, narr: `You spread your evidence on the table. ${char.name}'s composure cracks slightly.` },
+          pressure: { coopD: -0.14, pressD: 0.3, narr: `You lean forward. ${char.name} shifts in their seat.` },
+          legal: { coopD: 0.1, pressD: 0.18, narr: `You outline the potential charges. ${char.name} calculates silently.` },
+        }[id];
+        const newPress = Math.min(1, pressure + effects.pressD);
+        if (id === "pressure" && newPress > 0.82) {
+          setTranscript(t => [...t, { type: "narrator", text: "You pushed too hard." }, { type: "suspect", speaker: char.name, text: "This interview is over. My lawyer will be in touch." }]);
+          setDone(true);
+          setTimeout(onComplete, 2000);
+          return;
+        }
+        setCoop(c => Math.max(0, Math.min(1, c + effects.coopD)));
+        setPressure(newPress);
+        setTranscript(t => [...t, { type: "narrator", text: effects.narr }]);
+      };
+
+      const askQuestion = (topicKey, label) => {
+        if (done || topicsUsed.includes(topicKey)) return;
+        setTopicsUsed(u => [...u, topicKey]);
+        const response = getResponse(topicKey);
+        const isRevelation = coop > 0.78 && topicsUsed.length >= 2;
+        const finalResponse = isRevelation ? char.revelation : response;
+        const newTranscript = [...transcript, { type: "detective", speaker: "You", text: label }, { type: isRevelation ? "revelation" : "suspect", speaker: char.name, text: finalResponse }];
+        setTranscript(newTranscript);
+        if (isRevelation) {
+          onEvidenceCollect(char.revelationEvidence);
+          setDone(true);
+          setTimeout(onComplete, 2800);
+        }
+      };
+
+      const questions = [
+        { key: "whereWere", label: "Where were you tonight?" },
+        { key: "whatKnow", label: "What do you know about this theft?" },
+        { key: "whoInvolved", label: "Who else is involved?" },
+      ];
+
+      const approaches = [
+        { id: "rapport", label: "Build Rapport", icon: "🤝", desc: "Empathetic approach" },
+        { id: "evidence", label: "Present Evidence", icon: "📄", desc: "Show what you know", needsEv: true },
+        { id: "pressure", label: "Apply Pressure", icon: "⚡", desc: "Risky — can backfire", risky: true },
+        { id: "legal", label: "Legal Leverage", icon: "⚖️", desc: "Discuss charges" },
+      ];
+
+      return (
+        <div style={{ padding: "24px 28px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.1rem", color: char.color, fontWeight: 700 }}>{char.name}</div>
+              <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.9rem", color: "#6a5a42" }}>{char.role}</div>
+            </div>
+            <div style={{ display: "flex", gap: 20 }}>
+              {[{ label: "Cooperation", val: coop, color: "#2ab8a0" }, { label: "Pressure", val: pressure, color: "#c84242" }].map(m => (
+                <div key={m.label} style={{ textAlign: "right" }}>
+                  <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.72rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{m.label}</div>
+                  <div style={{ width: 80, height: 5, background: "#2a2218", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: `${m.val * 100}%`, height: "100%", background: m.color, borderRadius: 3, transition: "width 0.5s ease" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div ref={scrollRef} style={{ background: "#110e0a", border: "1px solid #2a2218", borderRadius: 8, padding: 16, height: 220, overflowY: "auto", marginBottom: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+            {transcript.map((entry, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {entry.speaker && (
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: 1, color: entry.type === "detective" ? "#c8872a" : entry.type === "revelation" ? "#f0c060" : entry.type === "narrator" ? "#4a3e2e" : char.color }}>
+                    {entry.speaker}
+                  </div>
+                )}
+                <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.96rem", lineHeight: 1.6, color: entry.type === "revelation" ? "#f0c060" : entry.type === "narrator" ? "#4a3e2e" : "#c8b898", fontStyle: entry.type === "narrator" ? "italic" : "normal", background: entry.type === "revelation" ? "rgba(240,192,96,0.07)" : "none", border: entry.type === "revelation" ? "1px solid rgba(240,192,96,0.2)" : "none", borderRadius: entry.type === "revelation" ? 5 : 0, padding: entry.type === "revelation" ? "8px 12px" : 0 }}>
+                  {entry.text}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {!done && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, paddingBottom: 24 }}>
+              <div>
+                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.72rem", color: "#c8872a", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Approach</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {approaches.map(a => (
+                    <button key={a.id} onClick={() => (a.needsEv && !hasEvidence) ? null : doApproach(a.id)} style={{ background: a.risky ? "rgba(200,66,66,0.06)" : "rgba(255,255,255,0.03)", border: `1px solid ${a.risky ? "rgba(200,66,66,0.3)" : "#2a2218"}`, borderRadius: 5, padding: "9px 12px", color: (a.needsEv && !hasEvidence) ? "#4a3e2e" : "#c8b898", fontFamily: "'Crimson Text', serif", fontSize: "0.9rem", cursor: (a.needsEv && !hasEvidence) ? "not-allowed" : "pointer", textAlign: "left", transition: "all 0.2s", display: "flex", gap: 8, alignItems: "center" }}>
+                      <span>{a.icon}</span>
+                      <span>{a.label}</span>
+                      {a.needsEv && !hasEvidence && <span style={{ fontSize: "0.7rem", color: "#c84242", marginLeft: "auto" }}>need evidence</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.72rem", color: "#2ab8a0", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Questions</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {questions.map(q => (
+                    <button key={q.key} onClick={() => askQuestion(q.key, q.label)} disabled={topicsUsed.includes(q.key)} style={{ background: "rgba(42,184,160,0.05)", border: `1px solid ${topicsUsed.includes(q.key) ? "#2a2218" : "rgba(42,184,160,0.3)"}`, borderRadius: 5, padding: "9px 12px", color: topicsUsed.includes(q.key) ? "#4a3e2e" : "#c8b898", fontFamily: "'Crimson Text', serif", fontSize: "0.9rem", cursor: topicsUsed.includes(q.key) ? "not-allowed" : "pointer", textAlign: "left", transition: "all 0.2s", textDecoration: topicsUsed.includes(q.key) ? "line-through" : "none" }}>
+                      {topicsUsed.includes(q.key) ? "✓ " : "❓ "}{q.label}
+                    </button>
+                  ))}
+                  <button onClick={() => { if (!done) { setTranscript(t => [...t, { type: "narrator", text: "You conclude the interview." }]); setDone(true); setTimeout(onComplete, 800); } }} style={{ background: "transparent", border: "1px solid #2a2218", borderRadius: 5, padding: "9px 12px", color: "#6a5a42", fontFamily: "'Crimson Text', serif", fontSize: "0.88rem", cursor: "pointer", textAlign: "left", marginTop: 4 }}>
+                    End interview →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── MAIN GAME ─────────────────────────────────────────────────────────────────
+    function WarriorsWisdomGame() {
+      const [sceneId, setSceneId] = useState("title");
+      const [evidence, setEvidence] = useState([]);
+      const [reputation, setReputation] = useState(50);
+      const [stress, setStress] = useState(0);
+      const [visitedScenes, setVisitedScenes] = useState(new Set());
+      const [showBoard, setShowBoard] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [animating, setAnimating] = useState(false);
+
+      const addEvidence = useCallback((ev) => {
+        if (!ev) return;
+        setEvidence(prev => {
+          if (prev.find(e => e.id === ev.id)) return prev;
+          setToast({ msg: `Evidence: ${ev.label}`, color: "#2ab8a0" });
+          setTimeout(() => setToast(null), 2800);
+          return [...prev, ev];
+        });
+      }, []);
+
+      const goTo = useCallback((nextId, ev, rep) => {
+        if (!nextId) return;
+        if (ev) addEvidence(ev);
+        if (rep) setReputation(r => Math.max(0, Math.min(100, r + rep)));
+        setAnimating(true);
+        setTimeout(() => {
+          setSceneId(nextId);
+          setVisitedScenes(v => new Set([...v, nextId]));
+          setAnimating(false);
+        }, 280);
+      }, [addEvidence]);
+
+      const resetGame = () => {
+        setSceneId("intro");
+        setEvidence([]);
+        setReputation(50);
+        setStress(0);
+        setVisitedScenes(new Set(["intro"]));
+        setShowBoard(false);
+      };
+
+      const scene = SCENES[sceneId];
+      const repColor = reputation > 65 ? "#2ab8a0" : reputation > 35 ? "#c8872a" : "#c84242";
+      const stressColor = stress > 50 ? "#c84242" : stress > 25 ? "#c8872a" : "#2ab8a0";
+
+      return (
+        <div style={{ minHeight: "100vh", background: "#0d0b08", color: "#e8ddc8", fontFamily: "'Georgia', serif" }}>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=Crimson+Text:ital,wght@0,400;0,600;1,400;1,600&display=swap');
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            ::-webkit-scrollbar { width: 4px; }
+            ::-webkit-scrollbar-track { background: #0d0b08; }
+            ::-webkit-scrollbar-thumb { background: #3a2e1e; border-radius: 2px; }
+            @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+            @keyframes slideIn { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:none; } }
+            @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+            @keyframes glow { 0%,100%{box-shadow:0 0 8px rgba(200,135,42,0.2)} 50%{box-shadow:0 0 20px rgba(200,135,42,0.5)} }
+            .scene-panel { animation: fadeUp 0.35s ease forwards; }
+            .choice-btn {
+              background: rgba(200,135,42,0.06);
+              border: 1px solid #3a2e1e;
+              border-radius: 7px;
+              padding: 14px 18px;
+              color: #c8b898;
+              font-family: 'Crimson Text', serif;
+              font-size: 1.02rem;
+              text-align: left;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              width: 100%;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
+              line-height: 1.5;
+            }
+            .choice-btn:hover {
+              background: rgba(200,135,42,0.14);
+              border-color: #c8872a;
+              color: #e8ddc8;
+              transform: translateX(5px);
+            }
+            .hotspot-btn {
+              background: rgba(42,184,160,0.06);
+              border: 1px solid rgba(42,184,160,0.3);
+              border-radius: 7px;
+              padding: 13px 16px;
+              color: #c8b898;
+              font-family: 'Crimson Text', serif;
+              font-size: 0.98rem;
+              text-align: left;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              width: 100%;
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            .hotspot-btn:hover {
+              background: rgba(42,184,160,0.14);
+              border-color: #2ab8a0;
+              color: #e8ddc8;
+              transform: translateX(4px);
+            }
+            .hud-btn {
+              background: none;
+              border: 1px solid #3a2e1e;
+              border-radius: 5px;
+              padding: 6px 12px;
+              color: #8a7a62;
+              font-family: 'Crimson Text', serif;
+              font-size: 0.85rem;
+              cursor: pointer;
+              transition: all 0.2s;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+            }
+            .hud-btn:hover { border-color: #c8872a; color: #c8872a; }
+            .hud-btn.active { border-color: #c8872a; color: #c8872a; background: rgba(200,135,42,0.08); }
+          `}</style>
+
+          {toast && <Toast msg={toast.msg} color={toast.color} />}
+          {showBoard && <EvidenceBoard evidence={evidence} onClose={() => setShowBoard(false)} />}
+
+          {sceneId === "title" && (
+            <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, background: "radial-gradient(ellipse at 50% 40%, #1a1008 0%, #0d0b08 70%)" }}>
+              <div style={{ maxWidth: 520, textAlign: "center", animation: "fadeUp 0.8s ease" }}>
+                <div style={{ fontSize: "3.5rem", marginBottom: 16, filter: "drop-shadow(0 0 20px rgba(200,135,42,0.6))" }}>🏺</div>
+                <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(2rem, 5vw, 3.2rem)", fontWeight: 900, color: "#c8872a", lineHeight: 1.1, marginBottom: 8, letterSpacing: 1 }}>The Warrior's Wisdom</h1>
+                <div style={{ fontFamily: "'Crimson Text', serif", fontStyle: "italic", color: "#6a5a42", fontSize: "1.1rem", marginBottom: 32 }}>A Detective Story — Kenya</div>
+                <div style={{ background: "#0f0c08", border: "1px solid #3a2e1e", borderRadius: 10, padding: "20px 24px", marginBottom: 36, textAlign: "left" }}>
+                  <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.95rem", color: "#8a7a62", lineHeight: 1.7 }}>
+                    Kenya's most sacred Kamba carving has vanished from the National Museum. A web of forgery, corruption, and cultural theft stretches from Nairobi to Mombasa — and reaches into the Cabinet itself.<br /><br />
+                    <span style={{ color: "#c8872a" }}>Investigate scenes. Collect evidence. Interrogate suspects. Uncover the truth.</span>
+                  </div>
+                </div>
+                <button onClick={() => goTo("intro")} style={{ background: "linear-gradient(135deg, #c8872a, #a06820)", border: "none", borderRadius: 8, padding: "16px 48px", color: "#fff", fontFamily: "'Playfair Display', serif", fontSize: "1.15rem", fontWeight: 700, cursor: "pointer", letterSpacing: 1, boxShadow: "0 4px 24px rgba(200,135,42,0.35)", transition: "all 0.2s", animation: "glow 2s infinite" }}>
+                  Begin Investigation →
+                </button>
+                <div style={{ marginTop: 20, fontFamily: "'Crimson Text', serif", fontSize: "0.82rem", color: "#4a3e2e" }}>
+                  6 locations · Forensics lab · Suspect interrogations · Evidence board
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sceneId === "finale" && (
+            <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, background: "radial-gradient(ellipse at 50% 40%, #081a06 0%, #0d0b08 70%)" }}>
+              <div style={{ maxWidth: 540, textAlign: "center", animation: "fadeUp 0.8s ease" }}>
+                <div style={{ fontSize: "3rem", marginBottom: 20, filter: "drop-shadow(0 0 20px rgba(42,184,160,0.6))" }}>🏺✅</div>
+                <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "2.2rem", color: "#2ab8a0", marginBottom: 12 }}>Case Resolved</h2>
+                <div style={{ fontFamily: "'Crimson Text', serif", fontStyle: "italic", color: "#6a5a42", fontSize: "1rem", marginBottom: 28 }}>Wilson Airport — Final Hour</div>
+                <div style={{ background: "#0f0c08", border: "1px solid rgba(42,184,160,0.3)", borderRadius: 10, padding: "22px 26px", marginBottom: 28, textAlign: "left" }}>
+                  <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "1.02rem", color: "#c8b898", lineHeight: 1.75 }}>
+                    The MV Uhuru Star was intercepted at sea. The Warrior's Wisdom — the <em>real</em> carving, safe all along in Kipkorir's care — will be returned to the museum under a new security protocol.<br /><br />
+                    Cabinet Secretary Njoroge is in custody. Governor Swaleh faces charges. Operation Amber Chain — two years in the making — is complete.<br /><br />
+                    <span style={{ color: "#2ab8a0" }}>Raj Patel shakes your hand outside the terminal. "Good work, Detective."</span>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 28 }}>
+                  {[
+                    { label: "Evidence", val: evidence.length, suffix: " items", color: "#c8872a" },
+                    { label: "Reputation", val: reputation, suffix: "%", color: reputation > 65 ? "#2ab8a0" : "#c8872a" },
+                    { label: "Stress", val: stress, suffix: " pts", color: stress > 40 ? "#c84242" : "#2ab8a0" },
+                  ].map(s => (
+                    <div key={s.label} style={{ background: "#0f0c08", border: "1px solid #2a2218", borderRadius: 8, padding: "14px 10px", textAlign: "center" }}>
+                      <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.75rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{s.label}</div>
+                      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.6rem", color: s.color, fontWeight: 700 }}>{s.val}<span style={{ fontSize: "0.9rem" }}>{s.suffix}</span></div>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={resetGame} style={{ background: "linear-gradient(135deg, #2ab8a0, #1e9a84)", border: "none", borderRadius: 8, padding: "14px 40px", color: "#fff", fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer", letterSpacing: 0.5 }}>
+                  Play Again →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {sceneId !== "title" && sceneId !== "finale" && (
+            <>
+              <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(13,11,8,0.96)", backdropFilter: "blur(12px)", borderBottom: "1px solid #2a2218", padding: "10px 20px" }}>
+                <div style={{ maxWidth: 700, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.95rem", fontWeight: 700, color: "#c8872a", letterSpacing: 1 }}>🏺 Warrior's Wisdom</div>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    {[{ label: "REP", val: reputation, color: repColor }, { label: "STRESS", val: stress, color: stressColor }].map(m => (
+                      <div key={m.label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                        <div style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.6rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 1 }}>{m.label}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <div style={{ width: 60, height: 4, background: "#2a2218", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ width: `${Math.min(100, m.val)}%`, height: "100%", background: m.color, borderRadius: 2, transition: "width 0.5s" }} />
+                          </div>
+                          <span style={{ fontSize: "0.72rem", color: m.color, fontFamily: "'Crimson Text', serif", fontWeight: 600 }}>{m.val}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <button className={`hud-btn${showBoard ? " active" : ""}`} onClick={() => setShowBoard(b => !b)}>
+                      📋 Evidence {evidence.length > 0 && <span style={{ background: "#c8872a", color: "#0d0b08", borderRadius: 10, padding: "1px 6px", fontSize: "0.7rem", fontWeight: 700 }}>{evidence.length}</span>}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ maxWidth: 700, margin: "0 auto", padding: "28px 16px 60px" }}>
+                {scene && !animating && (
+                  <div className="scene-panel" key={sceneId}>
+                    <div style={{ background: "#0f0c08", border: "1px solid #2a2218", borderRadius: 10, overflow: "hidden", marginBottom: 20 }}>
+                      {scene.art && <SceneArt type={scene.art} />}
+                      <div style={{ padding: "16px 20px 12px" }}>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.7rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4 }}>{scene.location}</div>
+                        {scene.narration && (
+                          <p style={{ fontFamily: "'Crimson Text', serif", fontSize: "1.05rem", lineHeight: 1.75, color: "#c8b898" }}>{scene.narration}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {scene.type === "story" && scene.choices && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.68rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4 }}>Your move, Detective</div>
+                        {scene.choices.map((c, i) => (
+                          <button key={i} className="choice-btn" onClick={() => goTo(c.next, c.evidence, c.rep)}>
+                            <span style={{ color: "#c8872a", fontWeight: 600, flexShrink: 0 }}>{i + 1}.</span>
+                            <span style={{ flex: 1 }}>{c.text}</span>
+                            {c.evidence && <span style={{ fontSize: "0.72rem", color: "#2ab8a0", flexShrink: 0, marginTop: 2 }}>+evidence</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {scene.type === "scene" && scene.hotspots && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.68rem", color: "#6a5a42", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4 }}>Investigate this location</div>
+                        {scene.hotspots.map((h, i) => (
+                          <button key={i} className="hotspot-btn" onClick={() => goTo(h.next || sceneId, h.evidence)}>
+                            <span style={{ fontSize: "1.2rem" }}>{h.icon}</span>
+                            <span style={{ flex: 1 }}>{h.label}</span>
+                            {h.evidence && <span style={{ fontSize: "0.72rem", color: "#2ab8a0", flexShrink: 0 }}>+evidence</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {scene.type === "forensics" && (
+                      <div style={{ background: "#0f0c08", border: "1px solid #2a2218", borderRadius: 10, overflow: "hidden" }}>
+                        <div style={{ background: "rgba(42,184,160,0.06)", borderBottom: "1px solid rgba(42,184,160,0.2)", padding: "12px 20px" }}>
+                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.7rem", color: "#2ab8a0", textTransform: "uppercase", letterSpacing: 2 }}>Forensics Laboratory</div>
+                        </div>
+                        <ForensicsGame
+                          puzzleKey={scene.puzzle}
+                          onComplete={() => goTo(scene.returnTo)}
+                          onEvidenceCollect={addEvidence}
+                        />
+                      </div>
+                    )}
+
+                    {scene.type === "interrogation" && (
+                      <div style={{ background: "#0f0c08", border: `1px solid ${scene.suspect.color}40`, borderRadius: 10, overflow: "hidden" }}>
+                        <div style={{ background: `rgba(${scene.suspect.color === "#c84242" ? "200,66,66" : scene.suspect.color === "#c8872a" ? "200,135,42" : "42,184,160"},0.06)`, borderBottom: `1px solid ${scene.suspect.color}30`, padding: "12px 20px" }}>
+                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.7rem", color: scene.suspect.color, textTransform: "uppercase", letterSpacing: 2 }}>Interrogation Room</div>
+                        </div>
+                        <InterrogationGame
+                          scene={scene}
+                          onComplete={() => goTo(scene.returnTo)}
+                          onEvidenceCollect={addEvidence}
+                          hasEvidence={evidence.length > 0}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #1e1a14" }}>
+                      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "0.65rem", color: "#4a3e2e", textTransform: "uppercase", letterSpacing: 2, marginBottom: 10 }}>Trail</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {[
+                          { id: "museum", label: "Museum" },
+                          { id: "crime_scene", label: "Crime Scene" },
+                          { id: "security_room", label: "Security" },
+                          { id: "market", label: "Market" },
+                          { id: "curator_office", label: "Office" },
+                          { id: "port", label: "Port" },
+                        ].map(loc => {
+                          const active = sceneId === loc.id || sceneId === `interrogate_${loc.id}` || sceneId === `forensics_${loc.id}`;
+                          const visited = visitedScenes.has(loc.id);
+                          return (
+                            <div key={loc.id} style={{ fontFamily: "'Crimson Text', serif", fontSize: "0.75rem", padding: "3px 9px", borderRadius: 3, background: active ? "rgba(200,135,42,0.12)" : visited ? "rgba(200,135,42,0.04)" : "transparent", border: `1px solid ${active ? "#c8872a" : visited ? "rgba(200,135,42,0.2)" : "#1e1a14"}`, color: active ? "#c8872a" : visited ? "#6a5a42" : "#3a3028", transition: "all 0.3s" }}>
+                              {active && <span style={{ animation: "pulse 1.5s infinite", marginRight: 4 }}>●</span>}{loc.label}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<WarriorsWisdomGame />, document.getElementById('root'));
+  </script>
+</body>
+</html>
